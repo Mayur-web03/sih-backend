@@ -1,0 +1,14 @@
+requests
+
+jupyterlab
+notebook
+ipykernel
+
+pandas
+numpy
+seaborn
+matplotlib
+plotly
+
+networkx
+neo4j

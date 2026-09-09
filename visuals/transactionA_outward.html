@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transaction A — Interactive Graph</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+body { margin:0; font-family:Arial,sans-serif; background:#0f172a; color:#e5e7eb; }
+#top { padding:14px 18px; background:#111827; border-bottom:1px solid #334155; }
+h2 { margin:0 0 6px; font-size:20px; }
+#stats { color:#94a3b8; font-size:13px; }
+#controls { display:flex; gap:8px; flex-wrap:wrap; padding:10px 18px; background:#111827; }
+button, input { border:1px solid #475569; border-radius:7px; padding:8px 10px; background:#1e293b; color:#e5e7eb; }
+button { cursor:pointer; }
+button:hover { background:#334155; }
+#search { min-width:280px; flex:1; max-width:520px; }
+#network { height:calc(100vh - 125px); min-height:520px; background:#f8fafc; }
+#info {
+  position:absolute; right:18px; top:125px; width:330px; max-width:calc(100vw - 36px);
+  background:rgba(15,23,42,.96); border:1px solid #475569; border-radius:10px;
+  padding:12px; display:none; z-index:10; word-break:break-word;
+}
+#info b { color:#f8fafc; }
+.small { color:#94a3b8; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <h2>Transaction A — Interactive Ethereum Graph</h2>
+  <div id="stats"></div>
+</div>
+<div id="controls">
+  <input id="search" placeholder="Search wallet address or transaction hash">
+  <button id="fit">Fit graph</button>
+  <button id="reset">Reset</button>
+  <button id="physics">Toggle physics</button>
+  <button id="labels">Toggle edge labels</button>
+</div>
+<div id="network"></div>
+<div id="info"></div>
+
+<script>
+const DATA = {"nodes": [{"id": "0x0ec72ac1f37f2b6e9182a9d4d3d062594773063c", "label": "0x0ec72a...73063c", "title": "<b>0x0ec72ac1f37f2b6e9182a9d4d3d062594773063c<\/b><br>Transactions involving this address: 1", "x": 180.0, "y": 0.0, "size": 18, "borderWidth": 1}, {"id": "0x846943093f519a47734765bef9ee1136800beb9c", "label": "0x846943...0beb9c", "title": "<b>0x846943093f519a47734765bef9ee1136800beb9c<\/b><br>Transactions involving this address: 51", "x": 63.34848384686423, "y": 194.96658584050647, "size": 28, "borderWidth": 3}, {"id": "0xd98b9cc1f3a8db4e2a24768e56b240deebac5e34", "label": "0xd98b9c...ac5e34", "title": "<b>0xd98b9cc1f3a8db4e2a24768e56b240deebac5e34<\/b><br>Transactions involving this address: 1", "x": -186.0739087062379, "y": 135.19060802726884, "size": 18, "borderWidth": 1}, {"id": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "label": "0xdb9b1e...047db3", "title": "<b>0xdb9b1e94b5b69df7e401ddbede43491141047db3<\/b><br>Transactions involving this address: 15", "x": -206.29933356561162, "y": -149.88523933458063, "size": 18, "borderWidth": 1}, {"id": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512", "label": "0xe7f172...3f0512", "title": "<b>0xe7f1725e7734ce288f8367e1bb143e90bb3f0512<\/b><br>Transactions involving this address: 2", "x": 86.52475842498522, "y": -266.295824562643, "size": 18, "borderWidth": 1}], "edges": [{"id": "e0", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x948fd5f91e31d62037a2070e9a1e4b56db1864c75200efb2e72e728c2b465bd9<br>Block: 11554817<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xe7f1725e7734ce288f8367e1bb143e90bb3f0512<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2472162700"}, {"id": "e1", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x93237ed5a61cfb88a5314871fd6710dea1be2501b41287ddca116c65bc23b160<br>Block: 11554937<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xe7f1725e7734ce288f8367e1bb143e90bb3f0512<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2507361706"}, {"id": "e5", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x7b0360bc6b86f3247a5b1637eaefad4a8ed47d11acd917e81fb26efa07afc135<br>Block: 11567882<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2489324242"}, {"id": "e6", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x208b5ad1f29fade16481985b8816a208de00c31e6ca72a1a805f73dc91d7ffe0<br>Block: 11568013<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2537980820"}, {"id": "e7", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x5487dabafd688cf538547b8944c1e940cff6b44060b99708e8fb6a865d1263de<br>Block: 11568111<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2489963626"}, {"id": "e15", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x0e361aa4c7be37dbff3a40238b272087bbeb02f1c241d4a70ca8e52b7ddc04b0<br>Block: 11581567<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2643497455"}, {"id": "e16", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x7601af451b1fcb22f6b928248131be0ea903954af63928064ee7ce38b4268f0d<br>Block: 11581581<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2625669262"}, {"id": "e17", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x3ad75d1ca2516e0e45fc7220a8ea118dddac820fd06e4c77a50feaf1107776c3<br>Block: 11581669<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2579741560"}, {"id": "e18", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x6a9e759e4efa71e7d2f58114292da6e6f8bceaeea3442199be8a7dbc00c9e5b7<br>Block: 11581736<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2591347750"}, {"id": "e19", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xd98b9cc1f3a8db4e2a24768e56b240deebac5e34", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0xaa45324573cf3a838994d6731034108a20e96686fba072d5b61b6d05be6b12c1<br>Block: 11581741<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xd98b9cc1f3a8db4e2a24768e56b240deebac5e34<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2634176386"}, {"id": "e23", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x65aad10cccffe0f298e70a0d451319b6cbe279fcdfcc9e6a275d15adee5e8c16<br>Block: 11582481<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2609076047"}, {"id": "e28", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x0bd9b590fbee15458a10db5532a74489a2de19562c14e055cd35c207a71a07c8<br>Block: 11582825<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2510989329"}, {"id": "e31", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x61561b7d7e13add94b0cfbd3248e526282d6c51c6c173b36f382757225ebcb97<br>Block: 11582921<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2481498989"}, {"id": "e33", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0xfc58f3b049be33eb38dd2045a05a557b277b9cbb4620371eeae6e4546224669e<br>Block: 11582986<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2517155556"}, {"id": "e34", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x72e2558f017525e7e90a76c1b2badc788a50aed0598987aefd3fcac3c5509c02<br>Block: 11582991<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2491118240"}, {"id": "e41", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x42aafc85b8337c300cabc1e3a5732fd0ac720cdc62fbea1c9fb9c0c62e2f2286<br>Block: 11658517<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2519508283"}, {"id": "e48", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0xf32424e1b4f92bd3f2bed5819019627c3608b51fb64d2d44fdb0022202567ec2<br>Block: 11665572<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2459187295"}, {"id": "e49", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0xdb9b1e94b5b69df7e401ddbede43491141047db3", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x42639762a900a9da3b2a5ff38dab8951abeef418db197c960cd08b3b99396f1f<br>Block: 11665639<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0xdb9b1e94b5b69df7e401ddbede43491141047db3<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2576519237"}, {"id": "e50", "from": "0x846943093f519a47734765bef9ee1136800beb9c", "to": "0x0ec72ac1f37f2b6e9182a9d4d3d062594773063c", "arrows": "to", "label": "", "title": "<b>Transaction<\/b><br>Hash: 0x07fe64c1a9f3bae2bf4ec689c05fba798009856605fb4c30c55e8f16326b22a7<br>Block: 11665650<br>From: 0x846943093f519a47734765bef9ee1136800beb9c<br>To: 0x0ec72ac1f37f2b6e9182a9d4d3d062594773063c<br>Value: 0 ETH<br>Gas used: <br>Gas price: 2553368584"}], "seed": "0x846943093f519a47734765bef9ee1136800beb9c", "total_rows": 51, "valid_edges": 19, "contract_creations": 0};
+
+const nodes = new vis.DataSet(DATA.nodes);
+const edges = new vis.DataSet(DATA.edges);
+
+const container = document.getElementById('network');
+const options = {
+  autoResize: true,
+  interaction: {
+    hover: true,
+    navigationButtons: true,
+    keyboard: true,
+    multiselect: false
+  },
+  physics: {
+    enabled: true,
+    stabilization: { iterations: 250 },
+    barnesHut: {
+      gravitationalConstant: -5000,
+      centralGravity: 0.15,
+      springLength: 150,
+      springConstant: 0.035,
+      damping: 0.8
+    }
+  },
+  nodes: {
+    shape: 'dot',
+    font: { size: 12, color: '#111827' },
+    color: {
+      background: '#ffffff',
+      border: '#334155',
+      highlight: { background: '#dbeafe', border: '#2563eb' }
+    }
+  },
+  edges: {
+    smooth: { type: 'dynamic' },
+    color: { color:'#94a3b8', highlight:'#2563eb' },
+    font: { size: 10, color:'#334155', strokeWidth:3, strokeColor:'#f8fafc' }
+  }
+};
+
+const network = new vis.Network(container, {nodes, edges}, options);
+
+document.getElementById('stats').textContent =
+  `${DATA.total_rows} transactions loaded · ${DATA.valid_edges} address-to-address edges · ` +
+  `${DATA.contract_creations} contract-creation transactions (shown as missing "to")`;
+
+const info = document.getElementById('info');
+
+network.on('click', function(params) {
+  if (params.nodes.length) {
+    const id = params.nodes[0];
+    const outgoing = edges.get({filter:e => e.from === id}).length;
+    const incoming = edges.get({filter:e => e.to === id}).length;
+    info.style.display = 'block';
+    info.innerHTML =
+      `<b>Address</b><br>${id}<br><br>` +
+      `<span class="small">Outgoing transactions: ${outgoing}<br>` +
+      `Incoming transactions: ${incoming}</span>`;
+  } else if (params.edges.length) {
+    const e = edges.get(params.edges[0]);
+    info.style.display = 'block';
+    info.innerHTML = e.title;
+  } else {
+    info.style.display = 'none';
+  }
+});
+
+document.getElementById('fit').onclick = () =>
+  network.fit({animation: {duration: 500}});
+
+document.getElementById('reset').onclick = () => {
+  network.setOptions(options);
+  network.fit({animation: {duration: 500}});
+  info.style.display = 'none';
+};
+
+let physicsOn = true;
+document.getElementById('physics').onclick = () => {
+  physicsOn = !physicsOn;
+  network.setOptions({physics: {enabled: physicsOn}});
+};
+
+let labelsOn = true;
+document.getElementById('labels').onclick = () => {
+  labelsOn = !labelsOn;
+  edges.forEach(e => edges.update({id:e.id, label: labelsOn ? e.label : ''}));
+};
+
+document.getElementById('search').addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const q = e.target.value.trim().toLowerCase();
+  if (!q) return;
+
+  const node = DATA.nodes.find(n => n.id.toLowerCase() === q || n.id.toLowerCase().includes(q));
+  if (node) {
+    network.selectNodes([node.id]);
+    network.focus(node.id, {scale:1.4, animation:{duration:500}});
+    return;
+  }
+
+  const edge = DATA.edges.find(x => x.title.toLowerCase().includes(q));
+  if (edge) {
+    network.selectEdges([edge.id]);
+    network.focus(edge.from, {scale:1.3, animation:{duration:500}});
+    return;
+  }
+
+  alert('No matching address or transaction hash found.');
+});
+</script>
+</body>
+</html>
