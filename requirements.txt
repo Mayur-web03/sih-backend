@@ -18,4 +18,5 @@ supabase
 psycopg2-binary
 
 reportlab
- uvicorn
+uvicorn
+fastapi
