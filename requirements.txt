@@ -12,3 +12,9 @@ plotly
 
 networkx
 neo4j
+
+dotenv
+supabase
+psycopg2-binary
+
+reportlab

@@ -1,7 +1,18 @@
 import requests
+import json
 
-url = "https://api.etherscan.io/v2/api?module=proxy&action=eth_getTransactionByHash&apikey=Z7JQRN2EP5SITUXU7CTPAZEHZ51U19E4J2"
+ADDRESS = "bc1qy4ra9luzrm5695r8qvpwglum5lsukpx7nd3eju"
 
-response = requests.get(url)
+url = f"https://mempool.space/api/address/{ADDRESS}"
 
-print(response.text)
+response = requests.get(url, timeout=30)
+
+print("HTTP Status:", response.status_code)
+
+if response.status_code != 200:
+    print(response.text)
+    exit()
+
+data = response.json()
+
+print(json.dumps(data, indent=2)) 
