@@ -18,3 +18,4 @@ supabase
 psycopg2-binary
 
 reportlab
+ uvicorn
