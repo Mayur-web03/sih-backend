@@ -85,8 +85,11 @@ class TronTransactionTracer:
                     url, headers=self._headers(), params=params, timeout=30
                 )
                 if resp.status_code == 429:  # rate limited
+                    print(f"    TRON 429 rate limited, retry {attempt + 1}/{retries}")
                     time.sleep(1.0 * (attempt + 1))
                     continue
+                if resp.status_code != 200:
+                    print(f"    TRON HTTP {resp.status_code}: {resp.text[:200]}")
                 resp.raise_for_status()
                 return resp.json()
             except requests.RequestException as exc:
@@ -226,10 +229,21 @@ class TronTransactionTracer:
 
     def _get_address_transactions(self, address):
         txs = []
+
+        print(f"    FETCHING OUTWARD TXS FOR: {address}")
+        print(f"    ASSET TYPE: {self.asset_type}")
+
         if self.asset_type in {"trx", "all"}:
-            txs.extend(self.get_trx_outward_transactions(address))
+            trx_txs = self.get_trx_outward_transactions(address)
+            print(f"    TRX RESULT COUNT: {len(trx_txs)}")
+            txs.extend(trx_txs)
+
         if self.asset_type in {"trc20", "all"}:
-            txs.extend(self.get_trc20_outward_transactions(address))
+            trc20_txs = self.get_trc20_outward_transactions(address)
+            print(f"    TRC20 RESULT COUNT: {len(trc20_txs)}")
+            txs.extend(trc20_txs)
+
+        print(f"    TOTAL OUTWARD TXS: {len(txs)}")
         return txs
 
     # ---------------- multi-hop ----------------
@@ -273,10 +287,15 @@ class TronTransactionTracer:
                 if self.request_delay:
                     time.sleep(self.request_delay)
 
+            print(f"    NEXT HOP ADDRESSES ({len(next_addresses)}): {sorted(next_addresses)}")
+
             current_addresses = next_addresses
+
             if not current_addresses:
+                print(f"    NO NEXT ADDRESSES AFTER HOP {hop}")
                 break
 
+        print(f"\nTRACE DONE. TOTAL TXS: {len(results)}")
         return results
 
     # ---------------- graph format for frontend ----------------
