@@ -1,12 +1,21 @@
 from fastapi import APIRouter, HTTPException
+
 from api.schemas import (
     TraceRequest,
     TraceResponse,
     TraceSummary,
-    TronTraceRequest,  # <-- Added
+    TronTraceRequest,
 )
 from etherTransaction.supa import TransactionTracer
-from tronTransaction.transaction import TronTransactionTracer  # <-- Added
+from tronTransaction.transaction import TronTransactionTracer
+
+# Supabase saver for TRON is optional: if tronTransaction/supa.py is missing
+# or broken, the backend (and the Ethereum flow) must still start normally.
+try:
+    from tronTransaction.supa import TronSupabaseSaver
+except Exception as _e:  # noqa: BLE001
+    TronSupabaseSaver = None
+    print(f"[WARN] TronSupabaseSaver not available: {_e}")
 
 router = APIRouter(prefix="/api")
 
@@ -63,8 +72,27 @@ def trace_tron_wallet(payload: TronTraceRequest):
         transactions = tracer.trace()
         graph = tracer.build_graph(transactions)
 
+        # Save TRON transactions to Supabase.
+        # A save failure must NOT break the trace response.
+        if TronSupabaseSaver is None:
+            save_result = {"saved": False, "error": "TronSupabaseSaver not available"}
+        else:
+            try:
+                saver = TronSupabaseSaver()
+                save_result = saver.save_transactions(
+                    transactions=transactions,
+                    case_id=payload.case_id,
+                    wallet_address=payload.address,
+                )
+            except Exception as save_err:  # noqa: BLE001
+                print(f"[WARN] TRON Supabase save failed: {save_err}")
+                save_result = {"saved": False, "error": str(save_err)}
+
         return {
-            "source": {"address": payload.address, "network": "TRON"},
+            "source": {
+                "address": payload.address,
+                "network": "TRON",
+            },
             "nodes": graph["nodes"],
             "edges": graph["edges"],
             "summary": {
@@ -72,6 +100,7 @@ def trace_tron_wallet(payload: TronTraceRequest):
                 "total_addresses": len(graph["nodes"]),
                 "max_hops": payload.max_hops,
             },
+            "supabase": save_result,
             "transactions": transactions,
         }
 
