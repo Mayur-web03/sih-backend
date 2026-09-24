@@ -25,6 +25,40 @@ class TraceRequest(BaseModel):
         return v
 
 
+# ============================================================
+# TRON TRACE REQUEST SCHEMA
+# ============================================================
+
+class TronTraceRequest(BaseModel):
+    address: str
+    max_hops: int = 3
+    asset_type: str = "all"
+    case_id: Optional[str] = None
+
+    @field_validator("address")
+    @classmethod
+    def validate_tron_address(cls, v: str) -> str:
+        v = v.strip()
+        if not re.match(r"^T[1-9A-HJ-NP-Za-km-z]{33}$", v):
+            raise ValueError("Invalid TRON address format")
+        return v
+
+    @field_validator("max_hops")
+    @classmethod
+    def validate_tron_max_hops(cls, v: int) -> int:
+        if v < 1 or v > 10:
+            raise ValueError("max_hops must be between 1 and 10")
+        return v
+
+    @field_validator("asset_type")
+    @classmethod
+    def validate_asset_type(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in {"trx", "trc20", "all"}:
+            raise ValueError("asset_type must be trx, trc20, or all")
+        return v
+
+
 class TransactionRecord(BaseModel):
     hop: int
     direction: str
