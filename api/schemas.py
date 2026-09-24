@@ -1,7 +1,8 @@
-from pydantic import BaseModel, field_validator
-from typing import List, Optional
-from datetime import datetime
 import re
+from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, field_validator, model_validator
 
 
 class TraceRequest(BaseModel):
@@ -106,18 +107,24 @@ class CaseCreate(BaseModel):
     status: str = "New"
     priority: str = "Medium"
     assigned_investigator: Optional[str] = None
-
-    @field_validator("primary_wallet")
-    @classmethod
-    def validate_wallet(cls, v: str) -> str:
-        v = v.strip()
-        if not re.match(r"^0x[a-fA-F0-9]{40}$", v):
-            raise ValueError("Invalid Ethereum address format")
-        return v.lower()
-
-    # trigger a trace immediately after case creation
     auto_trace: bool = True
     max_hops: int = 5
+
+    @model_validator(mode="after")
+    def validate_wallet_for_chain(self):
+        wallet = self.primary_wallet.strip()
+        chain = self.chain.strip().lower()
+
+        if chain == "tron":
+            if not re.match(r"^T[1-9A-HJ-NP-Za-km-z]{33}$", wallet):
+                raise ValueError("Invalid TRON address format")
+            self.primary_wallet = wallet
+        else:
+            if not re.match(r"^0x[a-fA-F0-9]{40}$", wallet):
+                raise ValueError("Invalid Ethereum address format")
+            self.primary_wallet = wallet.lower()
+
+        return self
 
 
 class CaseUpdate(BaseModel):
