@@ -1,6 +1,12 @@
 from fastapi import APIRouter, HTTPException
-from api.schemas import TraceRequest, TraceResponse, TraceSummary
+from api.schemas import (
+    TraceRequest,
+    TraceResponse,
+    TraceSummary,
+    TronTraceRequest,  # <-- Added
+)
 from etherTransaction.supa import TransactionTracer
+from tronTransaction.transaction import TronTransactionTracer  # <-- Added
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +49,38 @@ def trace_wallet(payload: TraceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Trace failed: {str(e)}")
 
+
+@router.post("/trace/tron")
+def trace_tron_wallet(payload: TronTraceRequest):
+    try:
+        tracer = TronTransactionTracer(
+            start_address=payload.address,
+            max_hops=payload.max_hops,
+            asset_type=payload.asset_type,
+            max_transactions_per_address=100,  # keeps request under Render timeout
+        )
+
+        transactions = tracer.trace()
+        graph = tracer.build_graph(transactions)
+
+        return {
+            "source": {"address": payload.address, "network": "TRON"},
+            "nodes": graph["nodes"],
+            "edges": graph["edges"],
+            "summary": {
+                "total_transactions": len(transactions),
+                "total_addresses": len(graph["nodes"]),
+                "max_hops": payload.max_hops,
+            },
+            "transactions": transactions,
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TRON trace failed: {str(e)}")
+
+
 @router.get("/cases/{case_id}/transactions")
 def get_case_transactions(case_id: str):
     from db import get_dict_cursor
@@ -58,7 +96,8 @@ def get_case_transactions(case_id: str):
             (case_id,),
         )
         return cur.fetchall()
-    
+
+
 @router.get("/health")
 def health_check():
     return {"status": "ok"}
