@@ -8,14 +8,7 @@ from api.schemas import (
 )
 from etherTransaction.supa import TransactionTracer
 from tronTransaction.transaction import TronTransactionTracer
-
-# Supabase saver for TRON is optional: if tronTransaction/supa.py is missing
-# or broken, the backend (and the Ethereum flow) must still start normally.
-try:
-    from tronTransaction.supa import TronSupabaseSaver
-except Exception as _e:  # noqa: BLE001
-    TronSupabaseSaver = None
-    print(f"[WARN] TronSupabaseSaver not available: {_e}")
+from tronTransaction.supa import TronSupabaseSaver
 
 router = APIRouter(prefix="/api")
 
@@ -72,21 +65,25 @@ def trace_tron_wallet(payload: TronTraceRequest):
         transactions = tracer.trace()
         graph = tracer.build_graph(transactions)
 
-        # Save TRON transactions to Supabase.
-        # A save failure must NOT break the trace response.
-        if TronSupabaseSaver is None:
-            save_result = {"saved": False, "error": "TronSupabaseSaver not available"}
-        else:
-            try:
-                saver = TronSupabaseSaver()
-                save_result = saver.save_transactions(
-                    transactions=transactions,
-                    case_id=payload.case_id,
-                    wallet_address=payload.address,
-                )
-            except Exception as save_err:  # noqa: BLE001
-                print(f"[WARN] TRON Supabase save failed: {save_err}")
-                save_result = {"saved": False, "error": str(save_err)}
+        # Save to existing Supabase PostgreSQL database.
+        # A save failure is reported in the response but does not lose the trace.
+        try:
+            saver = TronSupabaseSaver()
+            save_result = saver.save_to_supabase(
+                transactions=transactions,
+                wallet_address=payload.address,
+                case_id=payload.case_id,
+            )
+        except Exception as save_err:
+            print(f"[WARN] TRON Supabase save failed: {save_err}")
+            save_result = {"saved": False, "error": str(save_err)}
+
+        addresses = {payload.address}
+        for tx in transactions:
+            if tx.get("from"):
+                addresses.add(tx["from"])
+            if tx.get("to"):
+                addresses.add(tx["to"])
 
         return {
             "source": {
@@ -97,7 +94,7 @@ def trace_tron_wallet(payload: TronTraceRequest):
             "edges": graph["edges"],
             "summary": {
                 "total_transactions": len(transactions),
-                "total_addresses": len(graph["nodes"]),
+                "total_addresses": len(addresses),
                 "max_hops": payload.max_hops,
             },
             "supabase": save_result,
