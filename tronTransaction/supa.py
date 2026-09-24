@@ -1,77 +1,198 @@
 """
-Supabase persistence helpers for TRON transactions.
+Supabase persistence for TRON transactions.
+
+Uses the existing PostgreSQL connection:
+SUPABASE_DB_URL
 """
 
 import os
-from typing import Any, Dict, List, Optional
-
+import pandas as pd
+import psycopg2
+from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-from supabase import create_client, Client
+
 
 load_dotenv()
 
 
 class TronSupabaseSaver:
+
     def __init__(self):
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_key = os.getenv("SUPABASE_KEY")
+        self.supabase_db_url = os.getenv("SUPABASE_DB_URL")
 
-        if not supabase_url:
-            raise ValueError("SUPABASE_URL is not configured")
+        if not self.supabase_db_url:
+            raise ValueError(
+                "SUPABASE_DB_URL is missing from environment"
+            )
 
-        if not supabase_key:
-            raise ValueError("SUPABASE_KEY is not configured")
+    def _get_connection(self):
+        return psycopg2.connect(self.supabase_db_url)
 
-        self.supabase: Client = create_client(
-            supabase_url,
-            supabase_key,
+    def _upsert_wallet(
+        self,
+        cursor,
+        address,
+        tx_count_delta,
+    ):
+        """
+        Reuse the existing wallets table.
+
+        TRON is stored as chain='TRON'.
+        """
+
+        cursor.execute(
+            """
+            INSERT INTO wallets (
+                address,
+                chain,
+                tx_count,
+                first_seen,
+                last_seen,
+                last_traced_at,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                %s,
+                'TRON',
+                %s,
+                now(),
+                now(),
+                now(),
+                now(),
+                now()
+            )
+            ON CONFLICT (address) DO UPDATE SET
+                tx_count = wallets.tx_count + EXCLUDED.tx_count,
+                last_seen = now(),
+                last_traced_at = now(),
+                updated_at = now()
+            """,
+            (
+                address,
+                tx_count_delta,
+            ),
         )
 
-    def save_transactions(
+    def save_to_supabase(
         self,
-        transactions: List[Dict[str, Any]],
-        case_id: Optional[str] = None,
-        wallet_address: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        transactions,
+        wallet_address,
+        case_id=None,
+    ):
         """
-        Save TRON trace transactions into the existing
-        `transactions` Supabase table.
+        Save TRON transactions into the existing
+        transactions table.
         """
 
         if not transactions:
             return {
+                "saved": True,
                 "inserted": 0,
-                "message": "No TRON transactions to save",
+                "message": "No transactions to save",
             }
 
-        rows = []
+        connection = None
+        cursor = None
 
-        for tx in transactions:
-            row = {
-                "case_id": case_id,
-                "tx_hash": tx.get("tx_hash"),
-                "from_address": tx.get("from"),
-                "to_address": tx.get("to"),
-                "value_wei": str(tx.get("amount", "")),
-                "hop": tx.get("hop"),
-                "direction": "outward",
-                "block_number": str(tx.get("block_number", "")),
-                "timestamp": str(tx.get("timestamp", "")),
-                "is_error": "0",
-                "wallet_address": wallet_address
-                or tx.get("source_address"),
+        try:
+            connection = self._get_connection()
+            cursor = connection.cursor()
+
+            # --------------------------------------------------
+            # UPDATE / UPSERT SOURCE WALLET
+            # --------------------------------------------------
+
+            self._upsert_wallet(
+                cursor,
+                wallet_address,
+                len(transactions),
+            )
+
+            # --------------------------------------------------
+            # PREPARE TRANSACTION ROWS
+            # --------------------------------------------------
+
+            rows = []
+
+            for tx in transactions:
+
+                amount = tx.get("amount")
+
+                if amount is None:
+                    amount = "0"
+
+                block_number = tx.get("block_number")
+
+                if block_number is None:
+                    block_number = ""
+
+                timestamp = tx.get("timestamp")
+
+                if timestamp is None:
+                    timestamp = ""
+
+                rows.append(
+                    (
+                        case_id,
+                        tx.get("tx_hash"),
+                        tx.get("from"),
+                        tx.get("to"),
+                        str(amount),
+                        tx.get("hop"),
+                        "outward",
+                        str(block_number),
+                        str(timestamp),
+                        "0",
+                    )
+                )
+
+            # --------------------------------------------------
+            # INSERT INTO EXISTING TRANSACTIONS TABLE
+            # --------------------------------------------------
+
+            execute_values(
+                cursor,
+                """
+                INSERT INTO transactions (
+                    case_id,
+                    tx_hash,
+                    from_address,
+                    to_address,
+                    value_wei,
+                    hop,
+                    direction,
+                    block_number,
+                    timestamp,
+                    is_error
+                )
+                VALUES %s
+                """,
+                rows,
+            )
+
+            connection.commit()
+
+            return {
+                "saved": True,
+                "inserted": len(rows),
             }
 
-            rows.append(row)
+        except Exception as e:
 
-        response = (
-            self.supabase
-            .table("transactions")
-            .insert(rows)
-            .execute()
-        )
+            if connection:
+                connection.rollback()
 
-        return {
-            "inserted": len(rows),
-            "data": response.data,
-        }
+            return {
+                "saved": False,
+                "inserted": 0,
+                "error": str(e),
+            }
+
+        finally:
+
+            if cursor:
+                cursor.close()
+
+            if connection:
+                connection.close()
