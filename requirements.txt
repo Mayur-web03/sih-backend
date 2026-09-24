@@ -20,3 +20,6 @@ psycopg2-binary
 reportlab
 uvicorn
 fastapi
+
+base58
+python-dotenv
