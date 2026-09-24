@@ -1,198 +1,139 @@
-"""
-Supabase persistence for TRON transactions.
+from fastapi import APIRouter, HTTPException
 
-Uses the existing PostgreSQL connection:
-SUPABASE_DB_URL
-"""
+from api.schemas import (
+    TraceRequest,
+    TraceResponse,
+    TraceSummary,
+    TronTraceRequest,
+)
+from etherTransaction.supa import TransactionTracer
+from tronTransaction.transaction import TronTransactionTracer
 
-import os
-import pandas as pd
-import psycopg2
-from psycopg2.extras import execute_values
-from dotenv import load_dotenv
+# Supabase saver for TRON is optional: if tronTransaction/supa.py is missing
+# or broken, the backend (and the Ethereum flow) must still start normally.
+try:
+    from tronTransaction.supa import TronSupabaseSaver
+except Exception as _e:  # noqa: BLE001
+    TronSupabaseSaver = None
+    print(f"[WARN] TronSupabaseSaver not available: {_e}")
+
+router = APIRouter(prefix="/api")
+
+DEFAULT_MAX_HOPS = 5
 
 
-load_dotenv()
+@router.get("/config")
+def get_config():
+    return {"max_hops": DEFAULT_MAX_HOPS}
 
 
-class TronSupabaseSaver:
+@router.post("/trace", response_model=TraceResponse)
+def trace_wallet(payload: TraceRequest):
+    try:
+        tracer = TransactionTracer(
+            start_address=payload.address,
+            max_hops=payload.max_hops,
+        )
+        inward_df, outward_df = tracer.run_both(case_id=payload.case_id)
 
-    def __init__(self):
-        self.supabase_db_url = os.getenv("SUPABASE_DB_URL")
+        inward_records = inward_df.to_dict(orient="records") if not inward_df.empty else []
+        outward_records = outward_df.to_dict(orient="records") if not outward_df.empty else []
 
-        if not self.supabase_db_url:
-            raise ValueError(
-                "SUPABASE_DB_URL is missing from environment"
-            )
-
-    def _get_connection(self):
-        return psycopg2.connect(self.supabase_db_url)
-
-    def _upsert_wallet(
-        self,
-        cursor,
-        address,
-        tx_count_delta,
-    ):
-        """
-        Reuse the existing wallets table.
-
-        TRON is stored as chain='TRON'.
-        """
-
-        cursor.execute(
-            """
-            INSERT INTO wallets (
-                address,
-                chain,
-                tx_count,
-                first_seen,
-                last_seen,
-                last_traced_at,
-                created_at,
-                updated_at
-            )
-            VALUES (
-                %s,
-                'TRON',
-                %s,
-                now(),
-                now(),
-                now(),
-                now(),
-                now()
-            )
-            ON CONFLICT (address) DO UPDATE SET
-                tx_count = wallets.tx_count + EXCLUDED.tx_count,
-                last_seen = now(),
-                last_traced_at = now(),
-                updated_at = now()
-            """,
-            (
-                address,
-                tx_count_delta,
-            ),
+        summary = TraceSummary(
+            inward_transactions=len(inward_records),
+            outward_transactions=len(outward_records),
+            total_transactions=len(inward_records) + len(outward_records),
+            max_hops=payload.max_hops,
         )
 
-    def save_to_supabase(
-        self,
-        transactions,
-        wallet_address,
-        case_id=None,
-    ):
-        """
-        Save TRON transactions into the existing
-        transactions table.
-        """
+        return TraceResponse(
+            address=payload.address,
+            summary=summary,
+            inward=inward_records,
+            outward=outward_records,
+        )
 
-        if not transactions:
-            return {
-                "saved": True,
-                "inserted": 0,
-                "message": "No transactions to save",
-            }
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Trace failed: {str(e)}")
 
-        connection = None
-        cursor = None
 
-        try:
-            connection = self._get_connection()
-            cursor = connection.cursor()
+@router.post("/trace/tron")
+def trace_tron_wallet(payload: TronTraceRequest):
+    try:
+        tracer = TronTransactionTracer(
+            start_address=payload.address,
+            max_hops=payload.max_hops,
+            asset_type=payload.asset_type,
+            max_transactions_per_address=100,  # keeps request under Render timeout
+        )
 
-            # --------------------------------------------------
-            # UPDATE / UPSERT SOURCE WALLET
-            # --------------------------------------------------
+        transactions = tracer.trace()
+        graph = tracer.build_graph(transactions)
 
-            self._upsert_wallet(
-                cursor,
-                wallet_address,
-                len(transactions),
-            )
-
-            # --------------------------------------------------
-            # PREPARE TRANSACTION ROWS
-            # --------------------------------------------------
-
-            rows = []
-
-            for tx in transactions:
-
-                amount = tx.get("amount")
-
-                if amount is None:
-                    amount = "0"
-
-                block_number = tx.get("block_number")
-
-                if block_number is None:
-                    block_number = ""
-
-                timestamp = tx.get("timestamp")
-
-                if timestamp is None:
-                    timestamp = ""
-
-                rows.append(
-                    (
-                        case_id,
-                        tx.get("tx_hash"),
-                        tx.get("from"),
-                        tx.get("to"),
-                        str(amount),
-                        tx.get("hop"),
-                        "outward",
-                        str(block_number),
-                        str(timestamp),
-                        "0",
-                    )
+        # Save TRON transactions to Supabase.
+        # A save failure must NOT break the trace response.
+        if TronSupabaseSaver is None:
+            save_result = {"saved": False, "error": "TronSupabaseSaver not available"}
+        else:
+            try:
+                saver = TronSupabaseSaver()
+                save_result = saver.save_to_supabase(
+                    transactions=transactions,
+                    wallet_address=payload.address,
+                    case_id=payload.case_id,
                 )
+            except Exception as save_err:  # noqa: BLE001
+                print(f"[WARN] TRON Supabase save failed: {save_err}")
+                save_result = {"saved": False, "error": str(save_err)}
 
-            # --------------------------------------------------
-            # INSERT INTO EXISTING TRANSACTIONS TABLE
-            # --------------------------------------------------
+        addresses = {payload.address}
+        for tx in transactions:
+            if tx.get("from"):
+                addresses.add(tx["from"])
+            if tx.get("to"):
+                addresses.add(tx["to"])
 
-            execute_values(
-                cursor,
-                """
-                INSERT INTO transactions (
-                    case_id,
-                    tx_hash,
-                    from_address,
-                    to_address,
-                    value_wei,
-                    hop,
-                    direction,
-                    block_number,
-                    timestamp,
-                    is_error
-                )
-                VALUES %s
-                """,
-                rows,
-            )
+        return {
+            "source": {
+                "address": payload.address,
+                "network": "TRON",
+            },
+            "nodes": graph["nodes"],
+            "edges": graph["edges"],
+            "summary": {
+                "total_transactions": len(transactions),
+                "total_addresses": len(addresses),
+                "max_hops": payload.max_hops,
+            },
+            "supabase": save_result,
+            "transactions": transactions,
+        }
 
-            connection.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TRON trace failed: {str(e)}")
 
-            return {
-                "saved": True,
-                "inserted": len(rows),
-            }
 
-        except Exception as e:
+@router.get("/cases/{case_id}/transactions")
+def get_case_transactions(case_id: str):
+    from db import get_dict_cursor
 
-            if connection:
-                connection.rollback()
+    with get_dict_cursor() as cur:
+        cur.execute(
+            """
+            SELECT *
+            FROM transactions
+            WHERE case_id = %s
+            ORDER BY timestamp ASC
+            """,
+            (case_id,),
+        )
+        return cur.fetchall()
 
-            return {
-                "saved": False,
-                "inserted": 0,
-                "error": str(e),
-            }
 
-        finally:
-
-            if cursor:
-                cursor.close()
-
-            if connection:
-                connection.close()
+@router.get("/health")
+def health_check():
+    return {"status": "ok"}
